@@ -11,8 +11,11 @@ parser:mutex(
 	parser:flag("-t --list", "Lists files in an .alf file")
 )
 parser:option("--convert-paths", "Convert paths to/from windows paths (on file extraction, it's implied)"):choices({"never", "write", "always"}):default("write")
+parser:option("--directory", "Directory to output to. (default: <file>.out)")
 parser:argument("file", "File to act on")
 local args = parser:parse()
+
+args.directory = args.directory or (args.file..".out")
 
 local function arg_collapse(...)
 	local argl = {...}
@@ -50,8 +53,17 @@ if not lfs then warn("LuaFileSystem not found, you won't be able extract files!"
 
 local function make_parent(path)
 	if not lfs then run_screaming(-1, "can't extract without lfs!") end
+	local parts = {}
 	for part in path:gmatch("[^/]+") do
-		
+		table.insert(parts, part)
+	end
+	local cur_path = args.directory
+	for i=1, #parts do
+		if not lfs.attributes(cur_path) then
+			--lfs.makeDirectory(cur_path) -- someone's been doing too much opencomputers
+			lfs.mkdir(cur_path)
+		end
+		cur_path = cur_path .. "/" .. parts[i]
 	end
 end
 
@@ -109,6 +121,7 @@ if (args.read or args.extract or args.list) then
 			size = size,
 			offset = ptr
 		}
+		table.insert(files, path)
 	end
 	if (args.list) then os.exit(0) end
 	if (args.read) then
@@ -122,5 +135,19 @@ if (args.read or args.extract or args.list) then
 		local d = f:read(file.size) -- this probably should be read in chunks
 		io.stdout:write(d) -- but who cares
 		os.exit(0)
+	end
+	if args.extract then
+		for i=1, #files do
+			local file = files[files[i]]
+			local path = from_windows(files[i])
+			make_parent(path)
+			io.stderr:write(files[i], " => ", args.directory..path, "\n")
+			local out, res = io.open(args.directory..path, "wb")
+			if not out then run_screaming(1, "failed to open file", path, res) end
+			f:seek("set", file.offset)
+			local d = f:read(file.size)
+			out:write(d)
+			out:close()
+		end
 	end
 end
