@@ -49,7 +49,7 @@ local function prequire(pkg)
 end
 
 local lfs = prequire("lfs")
-if not lfs then warn("LuaFileSystem not found, you won't be able extract files!") end
+local zlib = prequire("zlib")
 
 local function make_parent(path)
 	if not lfs then run_screaming(-1, "can't extract without lfs!") end
@@ -89,7 +89,10 @@ end
 if not (args.write or args.read or args.extract or args.list) then
 	run_screaming(1, "must specify one of -rwxt")
 end
-if args.write then run_screaming(-1, "TODO: implement write") end
+--if args.write then run_screaming(-1, "TODO: implement write") end -- i can remove this now
+if not lfs then warn("LuaFileSystem not found, you won't be able extract or write files!") end
+if not zlib then warn("zlib not found, you won't be able to write files!") end
+if args.convert_paths == "never" then warn("I hope you know what you're doing.") end
 
 -- read
 if (args.read or args.extract or args.list) then
@@ -150,4 +153,47 @@ if (args.read or args.extract or args.list) then
 			out:close()
 		end
 	end
+elseif args.write then -- write
+	if not lfs or not zlib then run_screaming(1, "missing a required library, can't continue!") end
+	local h = io.open(args.file, "wb")
+	h:write((alf_hdr:pack("KAI!", 0, 0, 0)))
+	local files = {}
+	for line in io.stdin:lines() do
+		local stat = lfs.attributes(line)
+		if stat.mode == "file" then
+			local inf = io.open(line, "rb")
+			local crc = zlib.crc32()
+			local ptr = h:seek("cur", 0)
+			local size = 0
+			while true do
+				local indat, err = inf:read(1024*1024)
+				if not indat then run_screaming(1, "read error for file", line, err) end
+				size = size + #indat
+				crc(indat)
+				h:write(indat)
+				if #indat ~= 1024*1024 then break end
+			end
+			inf:close()
+			if size ~= stat.size then run_screaming(1, "i/o error: ", string.format("%d ~= %d", stat.size, size)) end
+			local rpath = (args.convert_paths ~= "never") and to_windows("/"..line) or ("\\"..line)
+			io.stderr:write(line, " => ", rpath, "\n")
+			table.insert(files, {
+				path = rpath,
+				offset = ptr,
+				size = stat.size,
+				crc = crc()
+			})
+		end
+	end
+	local table_offset = h:seek("cur", 0)
+	h:seek("set", 0)
+	h:write((alf_hdr:pack("KAI!", 0, #files, table_offset)))
+	h:seek("set", table_offset)
+	for i=1, #files do
+		local f = files[i]
+		h:write((alf_dirent:pack(f.crc, f.size, f.offset, #f.path)),f.path)
+	end
+	h:close()
+else -- just in case, i guess
+	run_screaming(-1, "how did we get here")
 end
