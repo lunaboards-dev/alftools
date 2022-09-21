@@ -126,7 +126,12 @@ if (args.read or args.extract or args.list) then
 		}
 		table.insert(files, path)
 	end
-	if (args.list) then os.exit(0) end
+	local alf_size = f:seek("cur", 0)
+	local function elaborate_leave()
+		io.stderr:write(string.format("%s: %d files (%s)\n", args.file, entries, to_human(alf_size)))
+		os.exit(0)
+	end
+	if (args.list) then elaborate_leave() end
 	if (args.read) then
 		local path = to_windows(args.read)
 		if args.convert_paths == "always" then path = args.read end
@@ -137,7 +142,7 @@ if (args.read or args.extract or args.list) then
 		f:seek("set", file.offset)
 		local d = f:read(file.size) -- this probably should be read in chunks
 		io.stdout:write(d) -- but who cares
-		os.exit(0)
+		elaborate_leave()
 	end
 	if args.extract then
 		for i=1, #files do
@@ -152,6 +157,7 @@ if (args.read or args.extract or args.list) then
 			out:write(d)
 			out:close()
 		end
+		elaborate_leave()
 	end
 elseif args.write then -- write
 	if not lfs or not zlib then run_screaming(1, "missing a required library, can't continue!") end
@@ -193,6 +199,7 @@ elseif args.write then -- write
 		local f = files[i]
 		h:write((alf_dirent:pack(f.crc, f.size, f.offset, #f.path)),f.path)
 	end
+	io.stderr:write(string.format("%s: %d files (%s)\n", args.file, #files, to_human(h:seek("cur", 0))))
 	h:close()
 else -- just in case, i guess
 	run_screaming(-1, "how did we get here")
